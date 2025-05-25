@@ -1,0 +1,6 @@
+{
+  "name": "WordPress Site Dashboard",
+  "description": "A dashboard to manage multiple WordPress sites and view their post counts.",
+  "requestFramePermissions": [],
+  "prompt": ""
+}

@@ -1,0 +1,697 @@
+/* Basic Reset */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica,
+    Arial, sans-serif;
+  line-height: 1.6;
+  background-color: #f0f2f5;
+  color: #333;
+  padding: 20px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start; /* Align to top for auth forms */
+  min-height: 100vh;
+}
+
+#root {
+  width: 100%;
+  max-width: 1200px;
+}
+
+/* Auth Container Styles */
+.auth-container {
+  max-width: 400px;
+  margin: 60px auto; /* Increased top/bottom margin */
+  padding: 35px; /* Slightly increased padding */
+  background-color: #ffffff;
+  border-radius: 10px; /* Slightly more rounded corners */
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1); /* Softer, more spread shadow */
+  text-align: center;
+  border-top: 4px solid #3f51b5; /* Accent color top border */
+}
+
+.auth-container h1 {
+  font-size: 2em; /* Slightly larger */
+  color: #3f51b5; /* Match accent color */
+  margin-bottom: 25px; /* Increased margin */
+  font-weight: 600;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px; /* Increased gap for better separation */
+}
+
+.auth-form input[type='text'],
+.auth-form input[type='email'],
+.auth-form input[type='password'] {
+  padding: 14px 16px; /* Slightly taller inputs */
+  border: 1px solid #dde1e6; /* Slightly lighter default border */
+  border-radius: 6px;
+  font-size: 1em;
+  width: 100%; /* Ensure full width */
+  box-sizing: border-box;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.auth-form input[type='text']:focus,
+.auth-form input[type='email']:focus,
+.auth-form input[type='password']:focus {
+  border-color: #3f51b5;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(63, 81, 181, 0.15); /* Softer focus shadow */
+}
+
+.auth-form button[type='submit'] {
+  padding: 14px 20px; /* Match input height */
+  background-color: #3f51b5;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 1.05em; /* Slightly larger font */
+  font-weight: 500; /* Medium font weight */
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+  width: 100%; /* Make button full width */
+}
+
+.auth-form button[type='submit']:hover {
+  background-color: #303f9f;
+}
+
+.auth-toggle {
+  margin-top: 20px; /* Increased spacing */
+  font-size: 0.9em;
+  color: #555;
+}
+
+.auth-toggle button {
+  background: none;
+  border: none;
+  color: #3f51b5;
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 1em;
+  font-weight: 500;
+  padding: 0 4px;
+}
+.auth-toggle button:hover {
+  color: #303f9f;
+}
+
+.error-message.auth-error {
+  background-color: #ffebee; /* Lighter red background */
+  border: 1px solid #e57373; /* Softer red border */
+  color: #c62828; /* Darker red text for contrast */
+  padding: 12px 15px; /* Adjusted padding */
+  border-radius: 6px; /* Consistent border radius */
+  font-size: 0.9em;
+  margin-top: 5px;
+  text-align: left;
+}
+
+/* Generic warning message - can be used in auth or other places */
+.warning-message {
+  font-size: 0.8em;
+  color: #555;
+  background-color: #fff9c4;
+  border: 1px solid #fbc02d;
+  padding: 8px;
+  border-radius: 4px;
+  margin-top: 10px;
+  text-align: left;
+}
+
+/* Warning message specific to auth container for "Data is stored using Supabase..." */
+.auth-container .warning-message {
+  font-size: 0.85em;
+  color: #333;
+  background-color: #e3f2fd; /* Light blue background */
+  border: 1px solid #90caf9; /* Blue border */
+  padding: 10px 15px;
+  border-radius: 6px;
+  margin-top: 20px;
+  text-align: center; /* Center the warning message text */
+}
+
+.warning-message.storage-warning { /* For the add site form specifically */
+  margin-bottom: 15px;
+  background-color: #fff3e0; /* Light orange */
+  border-color: #ffcc80; /* Orange border */
+  color: #4e342e; /* Dark brown text */
+}
+
+
+/* App Container Styles */
+.app-container {
+  background-color: #ffffff;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 25px;
+  border-bottom: 1px solid #e0e0e0;
+  padding-bottom: 15px;
+  flex-wrap: wrap; /* Allow wrapping for smaller screens */
+}
+
+header h1 {
+  font-size: 2.2em;
+  color: #1a237e; /* Dark blue */
+  margin: 0 10px 10px 0; /* Add bottom margin for spacing when wrapped, right margin for space from buttons */
+}
+
+.header-user-info {
+  display: flex;
+  align-items: center;
+  gap: 10px; 
+  font-size: 0.9em;
+  flex-wrap: wrap; 
+  margin-left: auto; /* Push user info and buttons to the right */
+}
+.header-user-info span {
+  margin-right: 10px; 
+}
+.header-user-info strong {
+    color: #3f51b5;
+}
+
+/* General styling for header buttons */
+.header-button {
+  padding: 8px 12px;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.9em;
+  cursor: pointer;
+  transition: background-color 0.3s ease, opacity 0.3s ease;
+  white-space: nowrap;
+}
+.header-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+
+.refresh-all-button {
+  background-color: #4CAF50; /* Green for refresh */
+  margin-right: 10px; /* Space between refresh and user info */
+}
+.refresh-all-button:hover:not(:disabled) {
+  background-color: #45a049;
+}
+
+
+.logout-button {
+  background-color: #546e7a; /* Darker grey-blue for logout */
+}
+.logout-button:hover:not(:disabled) {
+  background-color: #455a64;
+}
+
+.delete-account-button {
+  background-color: #e74c3c; /* Red for delete */
+}
+.delete-account-button:hover:not(:disabled) {
+  background-color: #c0392b;
+}
+
+
+.add-site-form {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  margin-bottom: 25px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 15px;
+}
+
+.add-site-form input[type='text'],
+.add-site-form input[type='url'],
+.add-site-form input[type='password'] {
+  padding: 12px 15px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 1em;
+  transition: border-color 0.3s ease;
+  width: 100%;
+}
+
+.add-site-form input[type='text']:focus,
+.add-site-form input[type='url']:focus,
+.add-site-form input[type='password']:focus {
+  border-color: #3f51b5;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(63, 81, 181, 0.2);
+}
+
+.add-site-form button[type='submit'] {
+  padding: 12px 20px;
+  background-color: #3f51b5;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 1em;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+  white-space: nowrap;
+  width: 100%;
+}
+
+@media (min-width: 600px) {
+    .add-site-form button[type='submit'] {
+        width: auto;
+        align-self: flex-start;
+    }
+}
+
+
+.add-site-form button[type='submit']:hover {
+  background-color: #303f9f;
+}
+
+.sites-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.site-card {
+  background-color: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  transition: box-shadow 0.3s ease;
+  display: flex;
+  flex-direction: column;
+}
+
+.site-card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.site-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start; /* Align items to the top of the header */
+  margin-bottom: 8px;
+  min-height: 40px; /* Ensure consistent header height even with input */
+}
+
+.site-card-header h2 {
+  font-size: 1.5em;
+  color: #2c3e50;
+  word-break: break-word;
+  margin-right: 10px; /* Space between title and actions */
+  flex-grow: 1; /* Allow title to take available space */
+  line-height: 1.3; /* Adjust if h2 is taller than input */
+}
+.site-card-header h2 em {
+  font-style: normal;
+  font-weight: bold;
+  color: #3f51b5; /* Highlight site name in modal title if needed */
+}
+
+.site-name-edit-container {
+  display: flex;
+  flex-direction: column; /* Stack input and error message */
+  flex-grow: 1;
+  margin-right: 10px; /* Space before action buttons */
+}
+
+.site-name-edit-input {
+  padding: 8px 10px;
+  border: 1px solid #3f51b5; /* Highlight border */
+  border-radius: 6px;
+  font-size: 1.2em; /* Match h2-ish size */
+  width: 100%;
+  box-sizing: border-box;
+  font-family: inherit;
+  margin-bottom: 5px; /* Space for error message if it appears */
+}
+.site-name-edit-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(63, 81, 181, 0.2);
+}
+
+.error-message.site-edit-error {
+  font-size: 0.8em;
+  padding: 4px 0; /* Minimal padding */
+  margin: 0; /* Remove default margins */
+  background-color: transparent; /* No background for inline error */
+  border: none; /* No border for inline error */
+  color: #c0392b; /* Error color */
+  text-align: left;
+}
+
+
+.site-card-actions {
+  display: flex;
+  align-items: center; /* Vertically align buttons if they have different heights */
+  gap: 6px; /* Space between buttons */
+  flex-shrink: 0; /* Prevent buttons from shrinking */
+}
+
+.site-action-button { /* Common styles for action buttons in card header */
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 5px; /* Small padding for icon buttons */
+  line-height: 1;
+  transition: color 0.2s ease, background-color 0.2s ease, transform 0.1s ease;
+  border-radius: 4px;
+  font-size: 1.1em; /* Default for icons */
+}
+.site-action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.site-action-button:active:not(:disabled) {
+    transform: translateY(1px);
+}
+
+
+.edit-button { /* For ✏️ */
+  color: #f39c12; /* Orange/Yellow for edit */
+}
+.edit-button:hover:not(:disabled) {
+  background-color: #fef5e7;
+  color: #d35400;
+}
+
+.save-button { /* For 💾 */
+  color: #27ae60; /* Green for save */
+  font-size: 1.2em;
+}
+.save-button:hover:not(:disabled) {
+  background-color: #e9f7ef;
+  color: #1e8449;
+}
+
+.cancel-button { /* For ↩️ */
+  color: #7f8c8d; /* Grey for cancel */
+  font-size: 1.2em;
+}
+.cancel-button:hover:not(:disabled) {
+  background-color: #f4f6f6;
+  color: #566573;
+}
+
+.reload-button {
+  color: #3f51b5; /* Theme color */
+  font-size: 1.2em; /* Adjust if using emoji or SVG */
+}
+.reload-button:hover:not(:disabled) {
+  background-color: #e8eaf6; /* Light theme color background */
+  color: #303f9f;
+}
+.reload-button:disabled {
+  color: #aaa;
+}
+
+.remove-button {
+  color: #e74c3c;
+  font-size: 1.8em; /* Existing size */
+}
+.remove-button:hover:not(:disabled) {
+  color: #c0392b;
+  background-color: #fdecea; /* Light red background on hover */
+}
+.remove-button:disabled {
+  color: #f5b7b1; /* Lighter red for disabled */
+}
+
+.site-url-display {
+  font-size: 0.85em;
+  color: #7f8c8d;
+  margin-bottom: 15px;
+  word-break: break-all;
+}
+.site-url-display a {
+  color: #3498db;
+  text-decoration: none;
+}
+.site-url-display a:hover {
+  text-decoration: underline;
+}
+
+
+.post-counts p {
+  font-size: 1em;
+  margin-bottom: 8px;
+  color: #34495e;
+}
+
+.post-counts p strong {
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+.last-published-date {
+  font-size: 0.9em;
+  color: #7f8c8d;
+  margin-left: 4px;
+}
+
+.loading-indicator {
+  text-align: center;
+  padding: 20px;
+  font-style: italic;
+  color: #7f8c8d;
+}
+
+.error-message {
+  color: #c0392b;
+  background-color: #fdecea;
+  border: 1px solid #e74c3c;
+  padding: 10px;
+  border-radius: 4px;
+  margin-top: 10px;
+  font-size: 0.9em;
+  word-wrap: break-word;
+}
+
+.global-error {
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.empty-state-message {
+  text-align: center;
+  padding: 30px;
+  font-size: 1.1em;
+  color: #7f8c8d;
+  border: 2px dashed #e0e0e0;
+  border-radius: 8px;
+  margin-top: 20px;
+}
+
+/* Modal Styles (Shared by Account and Site Delete) */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  padding: 15px; /* Add padding for smaller screens */
+}
+
+.modal-content {
+  background-color: #fff;
+  padding: 25px 30px;
+  border-radius: 8px;
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+  width: 90%;
+  max-width: 500px;
+  text-align: left;
+}
+
+.modal-content h2 {
+  margin-top: 0;
+  margin-bottom: 15px;
+  color: #c0392b; /* Red for warning title */
+  font-size: 1.6em;
+}
+.modal-content h2 em { /* For site name in title */
+  font-style: italic;
+  color: #2c3e50; /* Slightly softer color for the site name */
+}
+
+
+.modal-content p {
+  margin-bottom: 10px;
+  font-size: 0.95em;
+  line-height: 1.5;
+}
+
+.delete-confirm-input {
+  width: 100%;
+  padding: 10px;
+  margin-top: 5px;
+  margin-bottom: 15px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 1em;
+}
+.delete-confirm-input:focus {
+  border-color: #c0392b;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(192, 57, 43, 0.2);
+}
+
+.modal-actions {
+  margin-top: 20px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap; /* Allow buttons to wrap */
+}
+
+.modal-actions button {
+  padding: 10px 18px;
+  border-radius: 6px;
+  border: none;
+  font-size: 0.95em;
+  cursor: pointer;
+  transition: background-color 0.2s ease, opacity 0.2s ease;
+}
+
+.modal-button-delete {
+  background-color: #e74c3c;
+  color: white;
+}
+.modal-button-delete:hover {
+  background-color: #c0392b;
+}
+.modal-button-delete:disabled {
+  background-color: #f5b7b1; /* Lighter red for disabled */
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.modal-button-cancel {
+  background-color: #bdc3c7; /* Grey for cancel */
+  color: #333;
+}
+.modal-button-cancel:hover {
+  background-color: #95a5a6;
+}
+
+/* Error message specific to modals */
+.error-message.modal-error {
+  margin-top: 5px; /* Less margin than global/site card errors */
+  margin-bottom: 10px;
+  text-align: center; /* Center error text in modal */
+}
+
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+  .add-site-form button[type='submit'] {
+     width: 100%;
+     align-self: stretch;
+  }
+  header {
+    flex-direction: column;
+    align-items: stretch; /* Make header items take full width */
+    gap: 15px; /* Increase gap for column layout */
+  }
+  header h1 {
+    font-size: 1.8em;
+    text-align: center;
+    margin-bottom: 0; /* Removed bottom margin as gap handles spacing */
+  }
+  .header-user-info {
+    flex-direction: column; /* Stack buttons vertically */
+    align-items: stretch; /* Make buttons full width */
+    gap: 8px; /* Adjust gap for vertical stacking */
+    width: 100%; /* Ensure user info section takes full width */
+    margin-left: 0; /* Reset margin for column layout */
+  }
+  .header-user-info span {
+    text-align: center; /* Center user email */
+    margin-bottom: 5px; /* Add space below email */
+    margin-right: 0; /* Reset right margin */
+  }
+
+  .header-button { /* Apply to all header buttons for consistency */
+    width: 100%;
+    text-align: center;
+  }
+}
+
+@media (max-width: 480px) {
+  body {
+    padding: 10px;
+  }
+  .auth-container, .app-container {
+    padding: 20px; /* Adjusted padding for auth-container as well */
+  }
+  .auth-container h1 {
+    font-size: 1.8em; /* Adjusted auth title for smaller screens */
+  }
+  .auth-form {
+    gap: 15px; /* Slightly reduce gap on smallest screens */
+  }
+  .sites-grid {
+    grid-template-columns: 1fr;
+  }
+  .site-card-header h2 {
+    font-size: 1.3em;
+  }
+  .site-name-edit-input {
+    font-size: 1.0em; /* Adjust input font size for smaller screens if needed */
+  }
+  .add-site-form {
+    gap: 10px;
+  }
+  .form-grid {
+    gap: 10px;
+  }
+  .modal-content {
+    padding: 20px;
+  }
+  .modal-content h2 {
+    font-size: 1.4em;
+  }
+  .modal-actions {
+    flex-direction: column;
+  }
+  .modal-actions button {
+    width: 100%;
+  }
+}
+
+/* App Footer Styles */
+.app-footer {
+  text-align: center;
+  margin-top: 30px;
+  padding-top: 20px;
+  border-top: 1px solid #e0e0e0;
+  font-size: 0.9em;
+  color: #7f8c8d;
+}
