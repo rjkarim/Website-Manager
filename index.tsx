@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 // Fix: Import React to use React.Fragment
-import React, {useState, FormEvent, useEffect, useCallback, ChangeEvent, useRef} from 'react';
+import React, {useState, FormEvent, useEffect, useCallback, ChangeEvent, useMemo} from 'react';
 import ReactDOM from 'react-dom/client';
 import {jsx as _jsx, jsxs as _jsxs} from 'react/jsx-runtime';
 import { createClient, User as SupabaseUser, Session, SupabaseClient, PostgrestError } from '@supabase/supabase-js';
@@ -94,9 +94,14 @@ interface SiteClientState extends SiteCore { // Client-side full state
   drafts: number | null;
   published: number | null;
   lastPublishedDate: string | null;
+  lastPublishedUrl: string | null; 
   isLoading: boolean;
   error: string | null;
+  lastRefreshedAt: number | null; // Timestamp of the last successful WordPress data refresh
 }
+
+type DraftFilterOperator = 'exact' | 'gt' | 'lt' | '';
+
 
 function App() {
   const [sites, setSites] = useState<SiteClientState[]>([]);
@@ -132,12 +137,13 @@ function App() {
 
   const [isFetchingSites, setIsFetchingSites] = useState(false);
   const [initialSitesFetchFailedDueToMissingTable, setInitialSitesFetchFailedDueToMissingTable] = useState(false);
-  const [initialWpFetchCompletedForSession, setInitialWpFetchCompletedForSession] = useState(false);
-  const initialWpFetchCompletedForSessionRef = useRef(initialWpFetchCompletedForSession);
 
-  useEffect(() => {
-    initialWpFetchCompletedForSessionRef.current = initialWpFetchCompletedForSession;
-  }, [initialWpFetchCompletedForSession]);
+  // Filter State
+  const [showFilters, setShowFilters] = useState(false);
+  const [filterLastPublishedAfter, setFilterLastPublishedAfter] = useState(''); // YYYY-MM-DD
+  const [filterLastPublishedBefore, setFilterLastPublishedBefore] = useState(''); // YYYY-MM-DD
+  const [filterDraftsOperator, setFilterDraftsOperator] = useState<DraftFilterOperator>('');
+  const [filterDraftsCount, setFilterDraftsCount] = useState(''); // Store as string, parse to number
 
 
   // Supabase Auth Listener
@@ -153,15 +159,13 @@ function App() {
       const user = session?.user ?? null;
       if (activeUser?.id !== user?.id) { // Reset flag if user changes
         setInitialSitesFetchFailedDueToMissingTable(false);
-        setInitialWpFetchCompletedForSession(false); 
-        initialWpFetchCompletedForSessionRef.current = false;
       }
       setCurrentUser(user);
-      activeUser = user; 
+      activeUser = user; // Keep track of the current user for comparison
       setAuthLoading(false);
       if (!user) {
-        setSites([]); 
-        setEditingSiteId(null); 
+        setSites([]); // Clear sites if user logs out
+        setEditingSiteId(null); // Clear any editing state on logout
       }
     });
 
@@ -172,9 +176,7 @@ function App() {
       activeUser = user;
       setAuthLoading(false);
       if (!user) {
-        setInitialSitesFetchFailedDueToMissingTable(false); 
-        setInitialWpFetchCompletedForSession(false);
-        initialWpFetchCompletedForSessionRef.current = false;
+        setInitialSitesFetchFailedDueToMissingTable(false); // Reset if no user initially
       }
     });
 
@@ -213,7 +215,7 @@ function App() {
 
     setSites(prevSites =>
       prevSites.map(site =>
-        site.id === siteId ? { ...site, isLoading: true, error: null } : site
+        site.id === siteId ? { ...site, isLoading: true, error: null } : site 
       )
     );
 
@@ -224,55 +226,59 @@ function App() {
     try {
       const draftResponse = await fetch(
         `${siteUrl}/wp-json/wp/v2/posts?status=draft&per_page=1&context=embed${cacheBust}`,
-        {headers, mode: 'cors'} 
+        {headers}
       );
       if (!draftResponse.ok) throw new Error(`Drafts: HTTP ${draftResponse.status} ${draftResponse.statusText}`);
       const draftCount = parseInt(draftResponse.headers.get('X-WP-Total') || '0', 10);
 
       const publishedResponse = await fetch(
-        `${siteUrl}/wp-json/wp/v2/posts?status=publish&per_page=1&orderby=date&order=desc&context=embed${cacheBust}`,
-        {headers, mode: 'cors'} 
+        `${siteUrl}/wp-json/wp/v2/posts?status=publish&per_page=1&orderby=date&order=desc${cacheBust}`,
+        {headers}
       );
       if (!publishedResponse.ok) throw new Error(`Published: HTTP ${publishedResponse.status} ${publishedResponse.statusText}`);
       const publishedCount = parseInt(publishedResponse.headers.get('X-WP-Total') || '0', 10);
 
       let lastPublishedPostDate: string | null = null;
+      let lastPublishedPostUrl: string | null = null;
+
       if (publishedCount > 0) {
         const publishedPostsData = await publishedResponse.json();
-        if (publishedPostsData && publishedPostsData.length > 0 && publishedPostsData[0].date_gmt) { 
-            lastPublishedPostDate = publishedPostsData[0].date_gmt;
-        } else if (publishedPostsData && publishedPostsData.length > 0 && publishedPostsData[0].date) { 
-            lastPublishedPostDate = publishedPostsData[0].date;
+        if (publishedPostsData && publishedPostsData.length > 0) {
+            const latestPost = publishedPostsData[0];
+            if (latestPost.date_gmt) { // Prefer GMT date for consistent timezone handling
+                lastPublishedPostDate = latestPost.date_gmt;
+            } else if (latestPost.date) { // Fallback to 'date' if 'date_gmt' is not available
+                lastPublishedPostDate = latestPost.date;
+            }
+            if (latestPost.link) { 
+                lastPublishedPostUrl = latestPost.link;
+            }
         }
       }
 
       setSites(prevSites =>
         prevSites.map(site =>
           site.id === siteId
-            ? { ...site, isLoading: false, drafts: draftCount, published: publishedCount, lastPublishedDate: lastPublishedPostDate, error: null }
+            ? { ...site, isLoading: false, drafts: draftCount, published: publishedCount, lastPublishedDate: lastPublishedPostDate, lastPublishedUrl: lastPublishedPostUrl, error: null, lastRefreshedAt: Date.now() }
             : site
         )
       );
     } catch (error: any) {
-      console.error("Fetch error for WordPress site", siteUrl, error.message || error);
-      let errorMessage = `WordPress API Error: ${error.message}. Ensure REST API is active and credentials are correct.`;
-      
+      console.error("Fetch error for WordPress site", siteUrl, error);
+      let errorMessage = `WordPress API Error: ${error.message}. Ensure REST API is active, CORS is configured, and credentials are correct.`;
       if (error.message && typeof error.message === 'string' && error.message.toLowerCase().includes('failed to fetch')) {
-        errorMessage = `Network Error: Failed to fetch data from WordPress site (${siteUrl}). This is often a CORS (Cross-Origin Resource Sharing) issue. Please ensure your WordPress server is configured to allow requests from this web app's origin: ${window.location.origin}. Common solutions involve adding 'Access-Control-Allow-Origin: ${window.location.origin}' and 'Access-Control-Allow-Headers: Authorization, Content-Type' headers on your WordPress server (e.g., via .htaccess, theme functions.php, or a CORS plugin). Also verify network connectivity, that the site URL is correct and accessible, and no browser extensions are blocking the request.`;
-      } else if (error.message && typeof error.message === 'string' && (error.message.includes('HTTP 401') || error.message.includes('HTTP 403'))) {
-        errorMessage = `Authentication/Authorization Error (${error.message.match(/HTTP \d+/)?.[0] || 'status unknown'}): Please double-check your WordPress Username and Application Password. Ensure the Application Password has not been revoked and has sufficient permissions for the REST API. The site might be password-protected or require specific IP whitelisting.`;
-      } else if (error.message && typeof error.message === 'string' && error.message.includes('HTTP 404')) {
-        errorMessage = `Not Found Error (HTTP 404): The WordPress REST API endpoint might be incorrect or disabled. Ensure your site URL "${siteUrl}" is correct and the REST API is active (e.g., check if ${siteUrl}/wp-json/ is accessible). Some security plugins might block REST API access.`;
-      } else if (error.message && typeof error.message === 'string') {
-        errorMessage = `WordPress API Error: ${error.message}. Ensure REST API is active, site URL is correct, credentials are valid, and check for any WordPress security plugin interference.`;
-      } else {
-        errorMessage = `An unknown WordPress API error occurred for site ${siteUrl}. Check the browser console for more details.`;
+        errorMessage = `Network Error: Unable to connect to WordPress site at ${siteUrl}.\nThis could be due to:\n` +
+                       `1. Internet Connection: Please check your network connection.\n` +
+                       `2. WordPress Site Status: The site might be down or unreachable.\n` +
+                       `3. CORS Policy on WordPress: The WordPress site must allow requests from this app's origin (${window.location.origin}). This often requires server-level configuration (e.g., in .htaccess or via a plugin).\n` +
+                       `4. WordPress REST API: Ensure the REST API is enabled and accessible on the WordPress site.\n` +
+                       `5. Security Plugins/Firewalls: These on the WordPress site might be blocking the request.\n` +
+                       `Raw error: ${error.message}`;
       }
-
       setSites(prevSites =>
         prevSites.map(site =>
           site.id === siteId
-            ? { ...site, isLoading: false, error: errorMessage }
+            ? { ...site, isLoading: false, error: errorMessage } // Do not update lastRefreshedAt on error
             : site
         )
       );
@@ -291,30 +297,32 @@ function App() {
     setGlobalError(null);
 
     try {
-      const { data, error: supabaseError } = await supabase
+      const { data, error } = await supabase
         .from('sites')
         .select('*')
         .eq('user_id', currentUser.id)
         .order('created_at', { ascending: true });
 
-      if (supabaseError) {
-        console.error('Error fetching sites from Supabase. Raw error object:', supabaseError);
-        const pgError = supabaseError as PostgrestError;
+      if (error) {
+        console.error('Error fetching sites from Supabase. Raw error object:', error);
+        const pgError = error as PostgrestError;
         let userErrorMessage = `Failed to load sites: ${pgError.message}. Check console for details.`;
 
         if (pgError.code === '42P01') {
           userErrorMessage = "Critical Error: The 'sites' table does not exist in your Supabase database. Please create it according to the documentation/instructions. You may need to log out and log back in after creating the table.";
           setInitialSitesFetchFailedDueToMissingTable(true);
         } else if (pgError.message && pgError.message.toLowerCase().includes('failed to fetch')) {
-            userErrorMessage = `Network Error: Failed to fetch data from Supabase. This could be due to:\n` +
-                               `1. CORS (Cross-Origin Resource Sharing) issues: Ensure your Supabase project allows requests from this web app's origin (${window.location.origin}). Check Authentication > URL Configuration > Allowed Origins in your Supabase dashboard.\n` +
-                               `2. Network connectivity problems on your side.\n` +
-                               `3. Ad blockers or browser extensions interfering with requests.\n` +
-                               `Please check these and try again. Details: ${pgError.details || pgError.message}`;
+            userErrorMessage = `Network Error: Unable to connect to Supabase. This could be due to:\n` +
+                               `1. Internet Connection: Please check your network connection.\n` +
+                               `2. CORS Policy: Ensure your Supabase project allows requests from this app's origin (${window.location.origin}). Verify settings in Supabase Dashboard > Authentication > URL Configuration > Allowed Origins.\n` +
+                               `3. Ad Blockers/Firewalls: Browser extensions or firewalls might be blocking the request.\n` +
+                               `4. Supabase Service Status: Check if Supabase services are operational (e.g., status.supabase.com).\n` +
+                               `Please verify these and try again. Raw error: ${pgError.details || pgError.message}`;
             console.error(`User-facing error message context for "Failed to fetch": ${userErrorMessage}`);
         } else {
           userErrorMessage = `Failed to load sites: ${pgError.message}. Common issues: RLS policies missing/incorrect for 'sites' table (ensure SELECT is allowed for user's own data), or network problems.`;
         }
+
         console.error(
             `Detailed Supabase Error:\n` +
             `  Message: ${pgError.message}\n` +
@@ -325,75 +333,18 @@ function App() {
         setGlobalError(userErrorMessage);
         setSites([]);
       } else if (data) {
-        setInitialSitesFetchFailedDueToMissingTable(false);
-        const supabaseSites: SiteCore[] = data;
-        
-        // Use the ref to read the current value of initialWpFetchCompletedForSession
-        // This avoids making `fetchUserSites` dependent on the state variable `initialWpFetchCompletedForSession`
-        // for its identity, which helps in breaking potential `useEffect` loops.
-        const isFirstMajorFetchAttemptForSession = !initialWpFetchCompletedForSessionRef.current;
-
-        const newClientSitesState: SiteClientState[] = supabaseSites.map(siteCore => {
-          // For merging, we need the *current* `sites` state.
-          // This is tricky if we want `sites` not to be a direct dep of `fetchUserSites`'s `useCallback`.
-          // The original code correctly uses `sites` from the closure, which is fine if the `useEffect` loop is broken elsewhere.
-          const existingClientSite = sites.find(s => s.id === siteCore.id); // Reading current sites state
-
-          const hasValidUrlValue = isValidUrl(siteCore.url);
-          const hasAllCredentialsValue = siteCore.wp_application_password && siteCore.wp_username && hasValidUrlValue;
-          
-          let computedError: string | null = null;
-          let shouldLoadWpData = false;
-
-          if (isFirstMajorFetchAttemptForSession || !existingClientSite) {
-            if (hasAllCredentialsValue) {
-              shouldLoadWpData = true;
-            } else {
-              if (!hasValidUrlValue && siteCore.url) { 
-                computedError = "Invalid site URL. Cannot fetch WordPress data.";
-              } else if (!siteCore.url) {
-                computedError = "Site URL missing. Cannot fetch WordPress data.";
-              } else if (!siteCore.wp_application_password) {
-                computedError = "Application Password missing. Cannot fetch WordPress data.";
-              } else if (!siteCore.wp_username) {
-                computedError = "WordPress Username missing. Cannot fetch WordPress data.";
-              } else {
-                computedError = "WordPress credentials incomplete or invalid URL. Cannot fetch WordPress data.";
-              }
-            }
-            return {
-              ...siteCore,
-              drafts: null,
-              published: null,
-              lastPublishedDate: null,
-              isLoading: shouldLoadWpData,
-              error: computedError,
-            };
-          } else { 
-            return {
-              ...siteCore, 
-              drafts: existingClientSite.drafts,
-              published: existingClientSite.published,
-              lastPublishedDate: existingClientSite.lastPublishedDate,
-              isLoading: existingClientSite.isLoading, 
-              error: existingClientSite.error,       
-            };
-          }
-        });
-
-        setSites(newClientSitesState);
-
-        if (isFirstMajorFetchAttemptForSession && newClientSitesState.length > 0) {
-            // It's important this is set to true *after* this first pass of evaluation
-            // to prevent subsequent calls within the same session from re-triggering mass WP fetches.
-            setInitialWpFetchCompletedForSession(true); 
-        }
-        
-        newClientSitesState.forEach(site => {
-          if (site.isLoading && site.url && site.wp_username && site.wp_application_password) {
-            fetchSiteDataWordPress(site.id, site.url, site.wp_username, site.wp_application_password);
-          }
-        });
+        setInitialSitesFetchFailedDueToMissingTable(false); 
+        const sitesWithClientState: SiteClientState[] = data.map((siteCore: SiteCore) => ({
+          ...siteCore,
+          drafts: null,
+          published: null,
+          lastPublishedDate: null,
+          lastPublishedUrl: null, 
+          isLoading: false, 
+          error: "WordPress data not loaded. Click reload or 'Refresh All Sites'.", 
+          lastRefreshedAt: null, // Initialize lastRefreshedAt
+        }));
+        setSites(sitesWithClientState);
       }
     } catch (e: any) {
         console.error("Unexpected error during fetchUserSites:", e);
@@ -402,15 +353,7 @@ function App() {
     } finally {
       setIsFetchingSites(false);
     }
-  }, [
-    currentUser, 
-    initialSitesFetchFailedDueToMissingTable, 
-    fetchSiteDataWordPress, 
-    sites, // `sites` is still a dependency here due to `sites.find`
-    // initialWpFetchCompletedForSession, // Replaced by ref for reading inside
-    setInitialWpFetchCompletedForSession // Still needed for setting
-    // Supabase is available in closure
-  ]);
+  }, [currentUser, initialSitesFetchFailedDueToMissingTable, isFetchingSites]);
 
 
   useEffect(() => {
@@ -418,14 +361,61 @@ function App() {
         fetchUserSites();
     } else if (!currentUser) {
         setSites([]);
-        if (isFetchingSites) setIsFetchingSites(false); // Ensure loading state is reset
+        if (isFetchingSites) setIsFetchingSites(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser?.id, supabase, initialSitesFetchFailedDueToMissingTable]);
-  // By removing fetchUserSites from this dependency array, we prevent the loop
-  // where changes to `sites` (a dependency of fetchUserSites) would recreate
-  // fetchUserSites and re-trigger this effect. The effect will now only run
-  // when currentUser, supabase instance, or table status fundamentally changes.
+  }, [currentUser?.id, supabase, initialSitesFetchFailedDueToMissingTable]); // Removed fetchUserSites from dep array to avoid potential loops if it wasn't stable, relying on other deps to trigger it.
+
+
+  // Auto-refresh useEffect
+  useEffect(() => {
+    const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
+    const CHECK_INTERVAL_MS = 5 * 60 * 1000; // Check every 5 minutes
+
+    if (!currentUser || !sites.length || initialSitesFetchFailedDueToMissingTable) {
+      return; // Don't run if not logged in, no sites, or table missing
+    }
+
+    let intervalId: NodeJS.Timeout | undefined = undefined;
+
+    const checkForRefresh = () => {
+      // console.log("Auto-refresh check running at:", new Date().toLocaleTimeString());
+      const now = Date.now();
+      sites.forEach(site => {
+        // Skip if site is currently being name-edited, already loading, or critical DB error
+        if (editingSiteId === site.id || site.isLoading) {
+          return;
+        }
+
+        // Treat null lastRefreshedAt as needing refresh immediately
+        const timeSinceLastRefresh = site.lastRefreshedAt ? now - site.lastRefreshedAt : TWELVE_HOURS_MS;
+
+        if (
+          timeSinceLastRefresh >= TWELVE_HOURS_MS &&
+          site.url &&
+          site.wp_username &&
+          site.wp_application_password
+        ) {
+          // console.log(`Auto-refresh triggered for site: ${site.name} (ID: ${site.id}) at ${new Date().toLocaleTimeString()}`);
+          fetchSiteDataWordPress(site.id, site.url, site.wp_username, site.wp_application_password);
+        }
+      });
+    };
+
+    // Perform an initial check shortly after sites are loaded or dependencies change.
+    const initialCheckTimeoutId = setTimeout(checkForRefresh, 2000); // 2 seconds delay
+
+    intervalId = setInterval(checkForRefresh, CHECK_INTERVAL_MS);
+
+    return () => {
+      clearTimeout(initialCheckTimeoutId);
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+      // console.log("Auto-refresh interval cleared at:", new Date().toLocaleTimeString());
+    };
+  }, [sites, currentUser, fetchSiteDataWordPress, editingSiteId, initialSitesFetchFailedDueToMissingTable]);
+
 
   const handleAddSite = async (event: FormEvent) => {
     event.preventDefault();
@@ -480,7 +470,12 @@ function App() {
          userErrorMessage = "Critical Error: The 'sites' table does not exist. Site cannot be saved. Please create the table in Supabase.";
          setInitialSitesFetchFailedDueToMissingTable(true);
       } else if (pgError.message && pgError.message.toLowerCase().includes('failed to fetch')) {
-           userErrorMessage = `Network Error: Failed to add site. Could be CORS (origin: ${window.location.origin}), network issues, or ad blockers. Details: ${pgError.details || pgError.message}`;
+           userErrorMessage = `Network Error: Unable to connect to Supabase to add site. This could be due to:\n` +
+                               `1. Internet Connection: Please check your network connection.\n` +
+                               `2. CORS Policy: Ensure your Supabase project allows requests from this app's origin (${window.location.origin}). Verify settings in Supabase Dashboard > Authentication > URL Configuration > Allowed Origins.\n` +
+                               `3. Ad Blockers/Firewalls: Browser extensions or firewalls might be blocking the request.\n` +
+                               `4. Supabase Service Status: Check Supabase status pages.\n` +
+                               `Raw error: ${pgError.details || pgError.message}`;
       }
       setGlobalError(userErrorMessage);
       return;
@@ -492,36 +487,55 @@ function App() {
         drafts: null,
         published: null,
         lastPublishedDate: null,
+        lastPublishedUrl: null, 
         isLoading: true, 
         error: null,
+        lastRefreshedAt: null, // Initialize for new site
       };
       setSites(prevSites => [...prevSites, newSiteClientState]);
       setNewSiteName('');
       setNewSiteUrl('');
       setNewSiteWPUsername('');
       setNewSiteAppPassword('');
-      if (newSiteClientState.wp_application_password && isValidUrl(newSiteClientState.url)) {
+      if (newSiteClientState.wp_application_password) {
+        // This fetch will set lastRefreshedAt on success
         await fetchSiteDataWordPress(newSiteClientState.id, newSiteClientState.url, newSiteClientState.wp_username, newSiteClientState.wp_application_password);
-      } else if (!isValidUrl(newSiteClientState.url)){
-         setSites(prev => prev.map(s => s.id === newSiteClientState.id ? {...s, isLoading: false, error: "Invalid site URL. Cannot fetch WordPress data."} : s));
       } else {
-         setSites(prev => prev.map(s => s.id === newSiteClientState.id ? {...s, isLoading: false, error: "Application password missing. Cannot fetch WordPress data."} : s));
+         setSites(prev => prev.map(s => s.id === newSiteClientState.id ? {...s, isLoading: false, error: "Application password missing, cannot fetch WordPress data."} : s));
       }
     }
   };
 
-  const formatDate = (dateString: string | null) => {
+  const formatDate = (dateString: string | null): string => {
     if (!dateString) return 'N/A';
     try {
-      const date = new Date(dateString); 
+      const date = new Date(dateString); // Assuming dateString is a UTC string from WP API (e.g., date_gmt)
 
-      const year = date.getUTCFullYear();
-      const month = (date.getUTCMonth() + 1).toString().padStart(2, '0'); 
-      const day = date.getUTCDate().toString().padStart(2, '0');
+      // Get date part in Asia/Dhaka timezone, formatted as YYYY/MM/DD
+      const dateOptions: Intl.DateTimeFormatOptions = {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        timeZone: 'Asia/Dhaka',
+      };
+      // 'en-CA' locale often gives YYYY-MM-DD format.
+      const formattedDatePart = new Intl.DateTimeFormat('en-CA', dateOptions)
+                                    .format(date)
+                                    .replace(/-/g, '/'); // Replace hyphens with slashes
 
-      return `${year}/${month}/${day}`;
+      // Get time part in Asia/Dhaka timezone, formatted as h:mm AM/PM
+      const timeOptions: Intl.DateTimeFormatOptions = {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+        timeZone: 'Asia/Dhaka',
+      };
+      // 'en-US' locale is common for 12-hour AM/PM format.
+      const formattedTimePart = new Intl.DateTimeFormat('en-US', timeOptions).format(date);
+
+      return `${formattedDatePart} at ${formattedTimePart}`;
     } catch (e) {
-      console.error("Error formatting date:", e);
+      console.error("Error formatting date:", dateString, e);
       return 'Invalid Date';
     }
   };
@@ -536,8 +550,6 @@ function App() {
     setAuthError(null);
     setGlobalError(null);
     setInitialSitesFetchFailedDueToMissingTable(false);
-    setInitialWpFetchCompletedForSession(false);
-    initialWpFetchCompletedForSessionRef.current = false;
     if (!authEmail.trim() || !authPassword.trim()) {
       setAuthError("Email and password are required.");
       return;
@@ -547,14 +559,19 @@ function App() {
       password: authPassword,
     });
     if (error) {
-      setAuthError(error.message);
+      let errorMessage = error.message;
+       if (error.message && error.message.toLowerCase().includes('failed to fetch')) {
+           errorMessage = `Network Error: Signup failed. Unable to connect to Supabase.\n` +
+                          `Please check your internet connection and try again. If the issue persists, ensure this app's origin (${window.location.origin}) is allowed in your Supabase project's CORS settings and that Supabase services are operational.`;
+       }
+      setAuthError(errorMessage);
     } else if (data.user) {
       setAuthEmail('');
       setAuthPassword('');
       if (data.user.aud === 'authenticated' && !data.session) {
          setGlobalError("Signup successful. Please check your email to confirm your account.");
       } else if (data.session) {
-         setGlobalError(null); 
+         setGlobalError(null);
       }
     } else if (!data.session && !data.user){
         setAuthError("Signup attempt made, but no user or session data returned. Please check your email for confirmation or try logging in.");
@@ -570,18 +587,21 @@ function App() {
     setAuthError(null);
     setGlobalError(null);
     setInitialSitesFetchFailedDueToMissingTable(false);
-    setInitialWpFetchCompletedForSession(false); 
-    initialWpFetchCompletedForSessionRef.current = false;
     const { data, error } = await supabase.auth.signInWithPassword({
       email: authEmail,
       password: authPassword,
     });
     if (error) {
-      setAuthError(error.message);
+      let errorMessage = error.message;
+       if (error.message && error.message.toLowerCase().includes('failed to fetch')) {
+           errorMessage = `Network Error: Login failed. Unable to connect to Supabase.\n` +
+                          `Please check your internet connection and try again. If the issue persists, ensure this app's origin (${window.location.origin}) is allowed in your Supabase project's CORS settings and that Supabase services are operational.`;
+       }
+      setAuthError(errorMessage);
     } else if (data.user) {
       setAuthEmail('');
       setAuthPassword('');
-      setGlobalError(null); 
+      setGlobalError(null);
     }
   };
 
@@ -592,20 +612,25 @@ function App() {
     }
     setGlobalError(null);
     setInitialSitesFetchFailedDueToMissingTable(false);
-    setInitialWpFetchCompletedForSession(false);
-    initialWpFetchCompletedForSessionRef.current = false;
     setEditingSiteId(null); 
     const { error } = await supabase.auth.signOut();
     if (error) {
-      setGlobalError(`Logout failed: ${error.message}`);
+       let errorMessage = `Logout failed: ${error.message}`;
+       if (error.message && error.message.toLowerCase().includes('failed to fetch')) {
+           errorMessage = `Network Error: Logout failed. Unable to connect to Supabase.\n` +
+                          `Please check your internet connection. If the issue persists, Supabase services might be temporarily unavailable.`;
+       }
+      setGlobalError(errorMessage);
     } else {
-      setAuthView('login'); 
+      setCurrentUser(null);
+      setSites([]);
+      setAuthView('login');
     }
   };
 
   // --- Account Delete Handlers ---
   const handleShowAccountDeleteModal = () => {
-    setGlobalError(null); 
+    setGlobalError(null);
     setShowDeleteAccountModal(true);
   };
 
@@ -621,7 +646,7 @@ function App() {
       return;
     }
     if (!supabase) {
-        setGlobalError("Supabase is not configured or failed to initialize. Cannot delete account data.");
+        setGlobalError("Supabase is not configured. Cannot delete account data.");
         return;
     }
     if (!currentUser) {
@@ -630,7 +655,7 @@ function App() {
       return;
     }
 
-    setGlobalError(null);
+    setGlobalError(null); 
 
     if (!initialSitesFetchFailedDueToMissingTable) {
         const { error: sitesDeleteError } = await supabase
@@ -642,7 +667,11 @@ function App() {
           const pgError = sitesDeleteError as PostgrestError;
           let userErrorMessage = `Error deleting site data: ${pgError.message}. Please try again or check RLS policies (ensure DELETE is allowed).`;
            if (pgError.message && pgError.message.toLowerCase().includes('failed to fetch')) {
-            userErrorMessage = `Network Error: Failed to delete site data. Could be CORS (origin: ${window.location.origin}), network issues, or ad blockers. Details: ${pgError.details || pgError.message}`;
+            userErrorMessage = `Network Error: Failed to delete site data from Supabase. This could be due to:\n` +
+                               `1. Internet Connection or Supabase Service Status.\n` +
+                               `2. CORS Policy: Check Supabase Dashboard for origin (${window.location.origin}).\n` +
+                               `3. Ad Blockers/Firewalls.\n` +
+                               `Raw error: ${pgError.details || pgError.message}`;
           }
           setGlobalError(userErrorMessage); 
           return;
@@ -650,9 +679,8 @@ function App() {
     }
 
     await handleLogout(); 
-    handleCancelAccountDelete();
-    
-    setTimeout(() => setGlobalError("All your site data (if the 'sites' table existed and wasn't missing) has been deleted and you have been logged out. To fully delete your user account from the system, contact support (if applicable) or use Supabase admin tools."), 0);
+    handleCancelAccountDelete(); 
+    setTimeout(() => setGlobalError("All your site data (if the 'sites' table existed) has been deleted and you have been logged out. To fully delete your user account, contact support or use Supabase admin tools."), 0);
   };
 
 
@@ -661,7 +689,6 @@ function App() {
     if (editingSiteId === siteToDel.id) handleCancelEditSiteName(); 
     setSiteToDelete(siteToDel);
     setSiteDeleteError(null);
-    setGlobalError(null); 
     setDeleteSiteConfirmText('');
     setShowDeleteSiteModal(true);
   };
@@ -679,7 +706,7 @@ function App() {
       return;
     }
     if (!supabase) {
-        setSiteDeleteError("Supabase is not configured or failed to initialize. Cannot delete site.");
+        setSiteDeleteError("Supabase is not configured. Cannot delete site.");
         return;
     }
     if (!siteToDelete || !currentUser) {
@@ -687,7 +714,6 @@ function App() {
       handleCancelSiteDeletion();
       return;
     }
-    
     if (initialSitesFetchFailedDueToMissingTable) {
         setSiteDeleteError("Cannot delete site: The 'sites' table is missing in the database.");
         return;
@@ -704,7 +730,11 @@ function App() {
       const pgError = error as PostgrestError;
       let userErrorMessage = `Failed to delete site: ${pgError.message}. Check RLS policies (ensure DELETE is allowed).`;
        if (pgError.message && pgError.message.toLowerCase().includes('failed to fetch')) {
-           userErrorMessage = `Network Error: Failed to delete site. Could be CORS (origin: ${window.location.origin}), network issues, or ad blockers. Details: ${pgError.details || pgError.message}`;
+            userErrorMessage = `Network Error: Failed to delete site from Supabase. This could be due to:\n` +
+                               `1. Internet Connection or Supabase Service Status.\n` +
+                               `2. CORS Policy: Check Supabase Dashboard for origin (${window.location.origin}).\n` +
+                               `3. Ad Blockers/Firewalls.\n` +
+                               `Raw error: ${pgError.details || pgError.message}`;
       }
       setSiteDeleteError(userErrorMessage);
     } else {
@@ -727,28 +757,17 @@ function App() {
     if (siteToReload.isLoading) { 
         return;
     }
-    
-    let errorForSite: string | null = null;
-    if (!siteToReload.url || !isValidUrl(siteToReload.url)) {
-      errorForSite = "Cannot reload: Invalid or missing site URL.";
-    } else if (!siteToReload.wp_username) {
-      errorForSite = "Cannot reload: Missing WordPress username.";
-    } else if (!siteToReload.wp_application_password) {
-      errorForSite = "Cannot reload: Missing application password.";
-    }
 
-    if (errorForSite) {
+    if (!siteToReload.url || !siteToReload.wp_username || !siteToReload.wp_application_password) {
         setSites(prevSites =>
             prevSites.map(s =>
-                s.id === siteId ? { ...s, isLoading: false, error: errorForSite } : s
+                s.id === siteId ? { ...s, isLoading: false, error: "Cannot reload: Missing URL, WordPress username, or application password." } : s
             )
         );
         return;
     }
-    
-    if (siteToReload.url && siteToReload.wp_username && siteToReload.wp_application_password) {
-      await fetchSiteDataWordPress(siteToReload.id, siteToReload.url, siteToReload.wp_username, siteToReload.wp_application_password);
-    }
+    // This fetch will update lastRefreshedAt on success
+    await fetchSiteDataWordPress(siteToReload.id, siteToReload.url, siteToReload.wp_username, siteToReload.wp_application_password);
   }, [sites, fetchSiteDataWordPress, editingSiteId]);
 
 
@@ -757,7 +776,6 @@ function App() {
     setEditingSiteId(site.id);
     setEditingSiteNameInput(site.name);
     setSiteEditError(null); 
-    setGlobalError(null); 
   };
 
   const handleCancelEditSiteName = () => {
@@ -767,13 +785,9 @@ function App() {
   };
 
   const handleSaveSiteName = async () => {
-    if (!editingSiteId ) {
-        setSiteEditError("Error: No site selected for editing.");
-        return;
-    }
-    if(!editingSiteNameInput.trim()){
-        setSiteEditError("Site name cannot be empty.");
-        return;
+    if (!editingSiteId || !editingSiteNameInput.trim()) {
+      setSiteEditError("Site name cannot be empty.");
+      return;
     }
     if (!supabase || !currentUser) {
       setSiteEditError("Supabase client not available or user not logged in.");
@@ -803,7 +817,11 @@ function App() {
       const pgError = updateError as PostgrestError;
       let userErrorMessage = `Failed to update site name: ${pgError.message}.`;
       if (pgError.message && pgError.message.toLowerCase().includes('failed to fetch')) {
-           userErrorMessage = `Network Error: Failed to update site name. Could be CORS (origin: ${window.location.origin}), network issues, or ad blockers. Details: ${pgError.details || pgError.message}`;
+           userErrorMessage = `Network Error: Failed to update site name in Supabase. This could be due to:\n` +
+                               `1. Internet Connection or Supabase Service Status.\n` +
+                               `2. CORS Policy: Check Supabase Dashboard for origin (${window.location.origin}).\n` +
+                               `3. Ad Blockers/Firewalls.\n` +
+                               `Raw error: ${pgError.details || pgError.message}`;
       }
       setSiteEditError(userErrorMessage);
     } else {
@@ -818,41 +836,77 @@ function App() {
 
   // --- Refresh All Sites Handler ---
   const handleRefreshAllSites = async () => {
-     if (isFetchingSites) {
-        setGlobalError("Site list is currently being fetched, please wait.");
-        return;
-    }
-    if (!sites.length && !initialSitesFetchFailedDueToMissingTable) {
-        setGlobalError("No sites to refresh. Add some sites first!");
-        return;
-    }
-    if (initialSitesFetchFailedDueToMissingTable) {
-        setGlobalError("Cannot refresh: The 'sites' table is missing in the database.");
+    if (!sites.length) {
+        setGlobalError("No sites to refresh.");
         return;
     }
     setGlobalError(null);
-    
     let refreshableSiteFound = false;
-    let alreadyLoadingCount = 0;
-    
-    sites.forEach(site => {
-        if (site.isLoading) {
-            alreadyLoadingCount++;
-            refreshableSiteFound = true; 
-        } else if (site.url && isValidUrl(site.url) && site.wp_username && site.wp_application_password) {
+    for (const site of sites) {
+        // Also ensure site is not being edited
+        if (site.url && site.wp_username && site.wp_application_password && !site.isLoading && editingSiteId !== site.id) {
             refreshableSiteFound = true;
+            // This fetch will update lastRefreshedAt on success
             fetchSiteDataWordPress(site.id, site.url, site.wp_username, site.wp_application_password);
         }
-    });
-
-    if (!refreshableSiteFound && sites.length > 0) { 
-        setGlobalError("No sites could be refreshed (e.g., missing credentials, invalid URLs). Check individual site statuses.");
-    } else if (alreadyLoadingCount === sites.length && sites.length > 0) {
-        setGlobalError("All sites are already in the process of loading data.");
-    } else if (sites.length === 0 && !initialSitesFetchFailedDueToMissingTable) { 
-        setGlobalError("No sites to refresh.");
+    }
+    if (!refreshableSiteFound) {
+        setGlobalError("No sites could be refreshed (e.g., missing credentials, already loading, or a site is being edited).");
     }
   };
+
+  // --- Filter Handlers ---
+  const handleToggleFilters = () => {
+    setShowFilters(prev => !prev);
+  };
+
+  const handleResetFilters = () => {
+    setFilterLastPublishedAfter('');
+    setFilterLastPublishedBefore('');
+    setFilterDraftsOperator('');
+    setFilterDraftsCount('');
+    setShowFilters(false); // Optionally hide panel on reset
+  };
+
+  const filteredSites = useMemo(() => {
+    let currentSites = [...sites];
+
+    // Date Filtering
+    if (filterLastPublishedAfter) {
+      const afterDate = new Date(filterLastPublishedAfter + "T00:00:00.000Z"); // Treat as UTC start of day
+      currentSites = currentSites.filter(site => {
+        if (!site.lastPublishedDate) return false;
+        const siteDate = new Date(site.lastPublishedDate); // This is already UTC
+        return siteDate.getTime() >= afterDate.getTime();
+      });
+    }
+    if (filterLastPublishedBefore) {
+      const beforeDate = new Date(filterLastPublishedBefore + "T23:59:59.999Z"); // Treat as UTC end of day
+      currentSites = currentSites.filter(site => {
+        if (!site.lastPublishedDate) return false;
+        const siteDate = new Date(site.lastPublishedDate); // This is already UTC
+        return siteDate.getTime() <= beforeDate.getTime();
+      });
+    }
+
+    // Drafts Filtering
+    if (filterDraftsOperator && filterDraftsCount !== '') {
+      const count = parseInt(filterDraftsCount, 10);
+      if (!isNaN(count)) {
+        currentSites = currentSites.filter(site => {
+          if (site.drafts === null) return false; // Don't match if drafts count is unknown
+          switch (filterDraftsOperator) {
+            case 'exact': return site.drafts === count;
+            case 'gt': return site.drafts > count;
+            case 'lt': return site.drafts < count;
+            default: return true;
+          }
+        });
+      }
+    }
+    return currentSites;
+  }, [sites, filterLastPublishedAfter, filterLastPublishedBefore, filterDraftsOperator, filterDraftsCount]);
+
 
 
   // Render placeholder warning if Supabase URL/Key are not replaced
@@ -888,14 +942,14 @@ function App() {
   }
 
   if (authLoading) {
-    return _jsx('div', { className: 'loading-indicator auth-loading-indicator', children: 'Verifying authentication status...' });
+    return _jsx('div', { className: 'loading-indicator', children: 'Loading authentication...' });
   }
 
   if (!currentUser) {
     return _jsxs('div', {
       className: 'auth-container',
       children: [
-        _jsx('h1', { children: authView === 'login' ? 'Login to Dashboard' : 'Sign Up for Dashboard' }),
+        _jsx('h1', { children: authView === 'login' ? 'Login' : 'Sign Up' }),
         _jsxs('form', {
           onSubmit: authView === 'login' ? handleLogin : handleSignup,
           className: 'auth-form',
@@ -917,26 +971,27 @@ function App() {
               required: true
             }),
             _jsx('button', { type: 'submit', children: authView === 'login' ? 'Login' : 'Sign Up' }),
-            authError && _jsx('p', { className: 'error-message auth-error', role: 'alert', children: authError }),
-            globalError && _jsx('p', { className: 'error-message auth-error global-auth-error', role: 'alert', style: { whiteSpace: 'pre-wrap' }, children: globalError }),
+            authError && _jsx('p', { className: 'error-message auth-error', role: 'alert', style: { whiteSpace: 'pre-wrap' }, children: authError }),
+            globalError && _jsx('p', { className: 'error-message auth-error', role: 'alert', style: { whiteSpace: 'pre-wrap' }, children: globalError }),
             _jsxs('p', {
               className: 'auth-toggle',
               children: [
                 authView === 'login' ? "Don't have an account? " : "Already have an account? ",
                 _jsx('button', {
                   type: 'button',
-                  onClick: () => { setAuthView(authView === 'login' ? 'signup' : 'login'); setAuthError(null); setGlobalError(null); setInitialSitesFetchFailedDueToMissingTable(false); setInitialWpFetchCompletedForSession(false); initialWpFetchCompletedForSessionRef.current = false; setAuthEmail(''); setAuthPassword(''); },
-                  children: authView === 'login' ? 'Sign Up Here' : 'Login Here'
+                  onClick: () => { setAuthView(authView === 'login' ? 'signup' : 'login'); setAuthError(null); setGlobalError(null); setInitialSitesFetchFailedDueToMissingTable(false); },
+                  children: authView === 'login' ? 'Sign Up' : 'Login'
                 })
               ]
-            })
+            }),
+             _jsx('p', { className: 'warning-message', children: 'Data is stored using Supabase. Ensure your Supabase project is set up correctly with Row Level Security, and the "sites" table exists.'})
           ]
         })
       ]
     });
   }
 
-  const canRefreshAll = sites.length > 0 && !isFetchingSites && !initialSitesFetchFailedDueToMissingTable && !editingSiteId;
+  const canRefreshAll = sites.length > 0 && !isFetchingSites && !initialSitesFetchFailedDueToMissingTable && !editingSiteId && !sites.some(s => s.isLoading);
 
   return _jsxs('div', {
     className: 'app-container',
@@ -949,7 +1004,7 @@ function App() {
                 onClick: handleRefreshAllSites,
                 className: 'refresh-all-button header-button',
                 disabled: !canRefreshAll,
-                title: canRefreshAll ? "Refresh data for all applicable sites" : "Cannot refresh all sites (e.g., no sites, initial data loading, or editing a site name)",
+                title: canRefreshAll ? "Refresh data for all sites" : "Cannot refresh all sites (e.g., no sites, a site is loading, or a site is being edited)",
                 children: 'Refresh All Sites 🔄'
              }),
             _jsxs('span', { children: ['Logged in as: ', _jsx('strong', { children: currentUser.email || currentUser.id }) ]}),
@@ -958,13 +1013,68 @@ function App() {
           ]})
         ]
       }),
-      globalError &&
+      globalError && !showDeleteAccountModal && !siteDeleteError && 
         _jsx('p', {
           className: 'error-message global-error',
           role: 'alert',
           style: { whiteSpace: 'pre-wrap' }, 
           children: globalError,
         }),
+
+      _jsxs('div', { className: 'controls-area', children: [
+        _jsx('button', {
+            onClick: handleToggleFilters,
+            className: 'toggle-filters-button',
+            children: showFilters ? 'Hide Filters 🔼' : 'Show Filters 🔽'
+        }),
+        showFilters && _jsxs('div', { className: 'filter-panel', children: [
+            _jsx('h3', {children: 'Filter Sites'}),
+            _jsxs('div', { className: 'filter-group date-filter-group', children: [
+                _jsx('label', {htmlFor: 'filter-published-after', children: 'Last Published After:'}),
+                _jsx('input', {
+                    type: 'date',
+                    id: 'filter-published-after',
+                    value: filterLastPublishedAfter,
+                    onChange: e => setFilterLastPublishedAfter(e.target.value),
+                    'aria-label': 'Filter by Last published date after'
+                }),
+                _jsx('label', {htmlFor: 'filter-published-before', children: 'Last Published Before:'}),
+                _jsx('input', {
+                    type: 'date',
+                    id: 'filter-published-before',
+                    value: filterLastPublishedBefore,
+                    onChange: e => setFilterLastPublishedBefore(e.target.value),
+                    'aria-label': 'Filter by Last published date before'
+                })
+            ]}),
+            _jsxs('div', { className: 'filter-group drafts-filter-group', children: [
+                 _jsx('label', {htmlFor: 'filter-drafts-operator', children: 'Draft Posts:'}),
+                _jsxs('select', {
+                    id: 'filter-drafts-operator',
+                    value: filterDraftsOperator,
+                    onChange: e => setFilterDraftsOperator(e.target.value as DraftFilterOperator),
+                    'aria-label': 'Drafts filter operator',
+                    children: [
+                        _jsx('option', {value: '', children: 'Any Count'}),
+                        _jsx('option', {value: 'exact', children: 'Exactly'}),
+                        _jsx('option', {value: 'gt', children: 'More than'}),
+                        _jsx('option', {value: 'lt', children: 'Less than'})
+                    ]
+                }),
+                _jsx('input', {
+                    type: 'number',
+                    min: '0',
+                    value: filterDraftsCount,
+                    onChange: e => setFilterDraftsCount(e.target.value),
+                    placeholder: 'Count',
+                    'aria-label': 'Drafts filter count',
+                    disabled: !filterDraftsOperator
+                })
+            ]}),
+            _jsx('button', {onClick: handleResetFilters, className: 'reset-filters-button', children: 'Reset Filters & Hide'})
+        ]}),
+      ]}),
+      
       _jsxs('form', {
         onSubmit: handleAddSite,
         className: 'add-site-form',
@@ -1008,19 +1118,20 @@ function App() {
               disabled: initialSitesFetchFailedDueToMissingTable
             }),
           ]}),
-          _jsx('button', {type: 'submit', disabled: initialSitesFetchFailedDueToMissingTable, children: 'Add Site'})
+          _jsx('button', {type: 'submit', disabled: initialSitesFetchFailedDueToMissingTable, children: 'Add Site'}),
+            _jsx('p', { className: 'warning-message storage-warning', children: 'WordPress Application Passwords are sent to Supabase. Review Supabase security for sensitive data.'})
         ],
       }),
       isFetchingSites && !sites.length && !initialSitesFetchFailedDueToMissingTable &&
-        _jsx('div', { className: 'loading-indicator sites-loading-indicator', children: 'Loading your sites from Supabase...'}),
+        _jsx('div', { className: 'loading-indicator', children: 'Loading your sites from Supabase...'}),
       _jsx('div', {
         className: 'sites-grid',
         'aria-live': 'polite',
-        children: sites.map(site =>
+        children: filteredSites.map(site =>
           _jsxs(
             'div',
             {
-              className: `site-card ${site.isLoading ? 'site-loading' : ''} ${site.error ? 'site-error-state' : ''}`,
+              className: 'site-card',
               children: [
                 _jsxs('div', {
                   className: 'site-card-header',
@@ -1036,18 +1147,16 @@ function App() {
                                 'aria-label': `Edit name for ${site.name}`,
                                 autoFocus: true
                             }),
-                            siteEditError && _jsx('p', {className: 'error-message site-edit-error', role: 'alert', children: siteEditError})
+                            siteEditError && _jsx('p', {className: 'error-message site-edit-error', style: { whiteSpace: 'pre-wrap' }, children: siteEditError})
                         ]}) :
                         _jsx('h2', {children: site.name}),
                     _jsxs('div', { className: 'site-card-actions', children: [
                         editingSiteId === site.id ?
-                            
                             _jsxs(React.Fragment, { children: [
-                                _jsx('button', { onClick: handleSaveSiteName, className: 'save-button site-action-button', title: 'Save name', 'aria-label': `Save new name for ${site.name}`, children: '💾' }),
-                                _jsx('button', { onClick: handleCancelEditSiteName, className: 'cancel-button site-action-button', title: 'Cancel edit', 'aria-label': `Cancel editing name for ${site.name}`, children: '↩️' })
+                                _jsx('button', { onClick: handleSaveSiteName, className: 'save-button site-action-button', title: 'Save name', children: '💾' }),
+                                _jsx('button', { onClick: handleCancelEditSiteName, className: 'cancel-button site-action-button', title: 'Cancel edit', children: '↩️' })
                             ]})
                         :
-                            
                             _jsxs(React.Fragment, { children: [
                                 _jsx('button', {
                                     onClick: () => handleStartEditSiteName(site),
@@ -1062,14 +1171,14 @@ function App() {
                                     className: 'reload-button site-action-button',
                                     'aria-label': `Reload data for ${site.name}`,
                                     title: `Reload data for ${site.name}`,
-                                    disabled: site.isLoading || !site.url || !site.wp_username || !site.wp_application_password || !isValidUrl(site.url) || initialSitesFetchFailedDueToMissingTable,
+                                    disabled: site.isLoading || !site.url || !site.wp_username || !site.wp_application_password || initialSitesFetchFailedDueToMissingTable,
                                     children: '🔄'
                                 }),
                                 _jsx('button', {
                                   onClick: () => handleShowDeleteSiteModal(site),
                                   className: 'remove-button site-action-button',
-                                  'aria-label': `Remove site ${site.name}`,
-                                  title: `Remove site ${site.name}`,
+                                  'aria-label': `Remove ${site.name}`,
+                                  title: `Remove ${site.name}`,
                                   disabled: initialSitesFetchFailedDueToMissingTable,
                                   children: '×'
                                 }),
@@ -1086,17 +1195,16 @@ function App() {
                     children: site.url,
                   }),
                 }),
-                 _jsx('p', {className: 'site-wp-user', children: `WP User: ${site.wp_username}`}),
+                 _jsx('p', {style: {fontSize: '0.8em', color: '#555'}, children: `WP User: ${site.wp_username}`}),
                 site.isLoading && editingSiteId !== site.id && 
                   _jsx('div', {
-                    className: 'loading-indicator site-card-loading',
+                    className: 'loading-indicator',
                     children: 'Loading WordPress post data...',
                   }),
                 site.error && editingSiteId !== site.id &&
                   _jsx('p', {
-                    className: 'error-message site-card-error',
+                    className: 'error-message',
                     role: 'alert',
-                    style: { whiteSpace: 'pre-wrap' },
                     children: site.error,
                   }),
                 !site.isLoading && !site.error && editingSiteId !== site.id &&
@@ -1115,14 +1223,27 @@ function App() {
                           _jsx('strong', {children: 'Published Posts:'}),
                           ' ',
                           site.published ?? 'N/A',
-                          site.published !== null && site.published > 0 && site.lastPublishedDate &&
-                            _jsxs('span', { className: 'last-published-date', children: [
-                                ' (Last: ',
-                                formatDate(site.lastPublishedDate),
-                                ')'
-                            ]})
                         ],
                       }),
+                      (site.published !== null && site.published > 0) && _jsxs(React.Fragment, { children: [
+                          _jsxs('p', {
+                            children: [
+                              _jsx('strong', {children: 'Last Published:'}),
+                              ' ',
+                              formatDate(site.lastPublishedDate),
+                            ],
+                          }),
+                          _jsxs('p', {
+                            className: 'last-published-url-wrapper', 
+                            children: [
+                              _jsx('strong', {children: 'Last Post URL:'}), 
+                              ' ',
+                              site.lastPublishedUrl ? 
+                                _jsx('a', { href: site.lastPublishedUrl, target: '_blank', rel: 'noopener noreferrer', children: site.lastPublishedUrl }) 
+                                : 'N/A',
+                            ],
+                          }),
+                      ]})
                     ],
                   }),
               ],
@@ -1131,10 +1252,15 @@ function App() {
           )
         ),
       }),
+      sites.length > 0 && filteredSites.length === 0 && !globalError && !isFetchingSites && currentUser && !initialSitesFetchFailedDueToMissingTable &&
+        _jsx('p', {
+          className: 'empty-state-message',
+          children: 'No sites match your current filters. Try adjusting or clearing your filters.',
+        }),
       sites.length === 0 && !globalError && !isFetchingSites && currentUser && !initialSitesFetchFailedDueToMissingTable &&
         _jsx('p', {
           className: 'empty-state-message',
-          children: 'No sites added yet. Add WordPress site details using the form above to get started!',
+          children: 'No sites added yet. Add WordPress site details above to get started!',
         }),
 
       showDeleteAccountModal &&
@@ -1157,7 +1283,7 @@ function App() {
                 'aria-label': 'Type "delete" to confirm account data deletion',
                 className: 'delete-confirm-input'
               }),
-              globalError && _jsx('p', { className: 'error-message modal-error', role: 'alert', style: { whiteSpace: 'pre-wrap' }, children: globalError }),
+              globalError && _jsx('p', { className: 'error-message modal-error', children: globalError }), 
               _jsxs('div', {
                 className: 'modal-actions',
                 children: [
@@ -1194,7 +1320,7 @@ function App() {
                 'aria-label': `Type "delete" to confirm deletion of site ${siteToDelete.name}`,
                 className: 'delete-confirm-input'
               }),
-              siteDeleteError && _jsx('p', { className: 'error-message modal-error', role: 'alert', style: { whiteSpace: 'pre-wrap' }, children: siteDeleteError }),
+              siteDeleteError && _jsx('p', { className: 'error-message modal-error', children: siteDeleteError }), 
               _jsxs('div', {
                 className: 'modal-actions',
                 children: [
@@ -1209,11 +1335,7 @@ function App() {
               })
             ]
           })
-        }),
-      _jsx('footer', {
-        className: 'app-footer',
-        children: 'Developer by Rejaul Karim ❤'
-      })
+        })
     ],
   });
 }
